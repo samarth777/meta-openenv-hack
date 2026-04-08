@@ -1,0 +1,2 @@
+[console_scripts]
+server = peer_review_env.server.app:main

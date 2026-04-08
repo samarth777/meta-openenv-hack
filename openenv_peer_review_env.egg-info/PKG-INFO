@@ -1,0 +1,222 @@
+Metadata-Version: 2.4
+Name: openenv-peer-review-env
+Version: 0.1.0
+Summary: OpenEnv benchmark for learning peer review from OpenReview/NeurIPS snapshots
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: openenv-core[core]>=0.2.3
+Requires-Dist: openai>=2.30.0
+Requires-Dist: pydantic>=2.12.0
+Requires-Dist: requests>=2.33.0
+Requires-Dist: uvicorn>=0.44.0
+Requires-Dist: openreview-py>=2.0.1
+Requires-Dist: pymupdf>=1.27.2.2
+Requires-Dist: pymupdf4llm>=1.27.2.2
+Provides-Extra: dev
+Requires-Dist: pytest>=8.4.0; extra == "dev"
+
+---
+title: OpenReview Peer Review Benchmark
+emoji: 📄
+colorFrom: blue
+colorTo: purple
+sdk: docker
+pinned: false
+app_port: 8000
+base_path: /web
+tags:
+  - openenv
+---
+
+# OpenReview Peer Review Benchmark
+
+An OpenEnv environment for training and evaluating LLMs on realistic peer-review behavior.
+The benchmark uses a deterministic snapshot of public NeurIPS 2023 papers and reviews from OpenReview.
+Each task gives the agent a paper in markdown form and rewards it for drafting a review whose scores and content align with the human review distribution.
+
+## Motivation
+
+Peer review is a real-world reasoning and writing task with structured outputs, partial credit, and measurable quality dimensions.
+This environment simulates that workflow using public OpenReview data while remaining deterministic enough for RL and benchmark evaluation.
+
+## Environment Overview
+
+The environment exposes the standard OpenEnv interface:
+
+- `reset(task_id=..., seed=...) -> observation`
+- `step(action) -> observation`
+- `state() -> state`
+
+The local wrapper in `peer_review_env/benchmark.py` also provides:
+
+- `step(action) -> (observation, reward, done, info)`
+
+### Observation Space
+
+`PeerReviewObservation` includes:
+
+- `task_id`, `task_name`, `difficulty`
+- `objective`
+- `paper_markdown`
+- `attempts_remaining`
+- `current_score`, `best_score`
+- `score_breakdown`
+- `feedback`
+- `reward`, `done`, `metadata`
+
+### Action Space
+
+`PeerReviewAction` includes:
+
+- `summary`
+- `strengths`
+- `weaknesses`
+- `questions`
+- `rating` in `[1, 10]`
+- `confidence` in `[1, 5]`
+- `finalize`
+
+### State Space
+
+`PeerReviewState` includes:
+
+- `episode_id`, `step_count`
+- `task_id`, `task_name`, `difficulty`
+- `max_steps`, `done`
+- `best_score`, `last_score`
+- `last_action_error`
+
+## Tasks
+
+The benchmark ships with three deterministic tasks of increasing difficulty:
+
+1. `neurips23_easy_online_pca` (easy)
+Paper about online PCA for converging self-consistent field equations.
+Main challenge: capture obvious strengths and standard evaluation concerns.
+
+2. `neurips23_medium_erm` (medium)
+Theory-heavy ERM paper.
+Main challenge: balance strong technical praise with real reviewer concerns about organization and accessibility.
+
+3. `neurips23_hard_ip_omp` (hard)
+IP/OMP + explainable AI paper.
+Main challenge: match nuanced reviewer disagreement around explainability and the strength of the IP/OMP connection.
+
+## Grading
+
+Each task has a deterministic programmatic grader in `peer_review_env/grading.py`.
+The grader returns a score in `[0.0, 1.0]` based on:
+
+- summary coverage of paper themes
+- strengths alignment with reviewer positives
+- weaknesses alignment with reviewer concerns
+- question quality and specificity
+- closeness of `rating` to the mean human rating
+- closeness of `confidence` to the mean human confidence
+
+The overall score is a fixed weighted sum and is reproducible across runs.
+
+## Reward Function
+
+The reward is shaped during the trajectory, not only at the end.
+
+- positive reward for improving the episode's best grader score
+- small per-step penalty to discourage infinite looping
+- repeated-submission penalty for sending near-identical drafts
+- early-finalization penalty for locking in a weak review
+
+This makes intermediate revisions valuable and discourages destructive or stagnant behavior.
+
+## Setup
+
+### Local development with `uv`
+
+```bash
+uv venv .venv
+uv sync
+uv run openenv validate .
+uv run server
+```
+
+### Docker
+
+```bash
+docker build -t peer-review-env .
+docker run -p 8000:8000 peer-review-env
+```
+
+## Baseline Inference
+
+The required hackathon inference entrypoint lives at the repo root: `inference.py`.
+
+Required environment variables:
+
+- `HF_TOKEN` required
+- `API_BASE_URL` default: `https://api.openai.com/v1`
+- `MODEL_NAME` default: `gpt-4.1-mini`
+
+Run:
+
+```bash
+HF_TOKEN=... uv run python inference.py
+```
+
+The script:
+
+- uses the OpenAI Python client for all model calls
+- emits `[START]`, `[STEP]`, and `[END]` lines in the requested format
+- evaluates all three tasks in a reproducible order
+
+## Baseline Scores
+
+Baseline scores depend on the configured remote model, so they are not hard-coded.
+After running `inference.py`, report the observed per-task and average reward values here before submission.
+
+## Validation
+
+```bash
+uv run openenv validate .
+```
+
+## Hugging Face Spaces Deployment
+
+This repo is ready for containerized HF Spaces deployment:
+
+- root `Dockerfile`
+- root `openenv.yaml`
+- README front matter with `sdk: docker`
+- `openenv` tag included
+
+Typical flow:
+
+```bash
+uv run openenv validate .
+uv run openenv push --repo-id <username>/peer-review-env
+```
+
+## Data Source Notes
+
+The runtime benchmark uses a bundled deterministic snapshot derived from OpenReview data for these forums:
+
+- `https://openreview.net/forum?id=vq11gurmUY`
+- `https://openreview.net/forum?id=4KV2xLeqPN`
+- `https://openreview.net/forum?id=CAF4CnUblx`
+
+This keeps the environment deterministic and deployable on limited hardware while preserving realistic human review targets.
+
+To rebuild the snapshot using the documented OpenReview API client:
+
+```bash
+OPENREVIEW_USERNAME=... OPENREVIEW_PASSWORD=... uv run python scripts/build_openreview_snapshot.py
+```
+
+This script uses `openreview.api.OpenReviewClient` and the documented `get_note()` / `get_all_notes()` retrieval flow.
+
+For repeated runs, avoid login rate limits by minting and reusing a bearer token:
+
+```bash
+OPENREVIEW_USERNAME=... OPENREVIEW_PASSWORD=... uv run python scripts/mint_openreview_token.py
+OPENREVIEW_TOKEN=... uv run python scripts/build_openreview_snapshot.py
+```
+
+The OpenReview client accepts `token=` directly, which skips the login request entirely.
