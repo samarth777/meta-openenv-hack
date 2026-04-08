@@ -49,11 +49,18 @@ The runtime data source is `peer_review_env/data_snapshot.json`, which stores:
 
 ## Tasks
 
-1. `neurips23_easy_online_pca`
-2. `neurips23_medium_erm`
-3. `neurips23_hard_ip_omp`
+The environment currently ships with a bundled 5-paper snapshot from NeurIPS 2023.
+Tasks are loaded dynamically from `peer_review_env/data_snapshot.json` and exposed as easy, medium, and hard instances.
 
-These span easy to hard based on how predictable the final review scores are from the paper alone.
+Examples currently bundled include:
+
+1. `neurips23_paper_0008`
+2. `neurips23_paper_0019`
+3. `neurips23_paper_0021`
+4. `neurips23_paper_0022`
+5. `neurips23_paper_0024`
+
+The code supports larger snapshots without changing the environment logic.
 
 ## Grading
 
@@ -103,6 +110,25 @@ Run:
 ```bash
 HF_TOKEN=... uv run python inference.py
 ```
+
+The script emits only the required line types:
+
+- `[START]`
+- `[STEP]`
+- `[END]`
+
+with rewards formatted to two decimals and single-line output suitable for automated parsing.
+
+## Baseline Performance Scores
+
+Baseline scores depend on the remote model configured by `MODEL_NAME` and `API_BASE_URL`.
+Record the actual baseline by running:
+
+```bash
+HF_TOKEN=... uv run python inference.py
+```
+
+and then copy the observed per-task rewards and success rates into this section before final submission.
 
 ## Rebuilding Data
 

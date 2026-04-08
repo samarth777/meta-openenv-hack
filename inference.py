@@ -13,8 +13,10 @@ from peer_review_env import (
 )
 
 
-API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4.1-mini")
+API_BASE_URL = os.getenv(
+    "API_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/"
+)
+MODEL_NAME = os.getenv("MODEL_NAME", "gemini-3.1-flash-lite-preview")
 HF_TOKEN = os.getenv("HF_TOKEN")
 
 if HF_TOKEN is None:
@@ -76,6 +78,12 @@ def _sanitize_action(
     )
 
 
+def _single_line(text: str | None) -> str:
+    if text is None:
+        return "null"
+    return re.sub(r"\s+", " ", str(text)).strip() or "null"
+
+
 def run_task(task_id: str) -> list[float]:
     env = PeerReviewBenchmark()
     rewards: list[float] = []
@@ -116,7 +124,7 @@ def run_task(task_id: str) -> list[float]:
             action_str = json.dumps(
                 action.model_dump(), ensure_ascii=True, separators=(",", ":")
             )
-            error_str = str(last_error) if last_error else "null"
+            error_str = _single_line(last_error)
             print(
                 f"[STEP] step={steps} action={action_str} reward={reward:.2f} done={str(done).lower()} error={error_str}"
             )

@@ -102,9 +102,8 @@ class PeerReviewEnvironment(
         best_before = self._state.best_score
         best_after = max(best_before, current_score)
 
-        quality_reward = (2 * current_score) - 1
         improvement_bonus = max(0.0, best_after - best_before)
-        reward = quality_reward + (0.25 * improvement_bonus)
+        reward = current_score + (0.15 * improvement_bonus)
         feedback = list(grading.feedback)
 
         signature = self._signature(action)
@@ -133,7 +132,7 @@ class PeerReviewEnvironment(
         elif self._state.step_count >= self._task.max_steps and not action.finalize:
             feedback.append("Max prediction attempts reached.")
 
-        reward = max(-1.0, min(1.0, round(reward, 4)))
+        reward = max(0.0, min(1.0, round(reward, 4)))
         self._state.done = done
         self._state.last_score = current_score
         self._state.best_score = best_after

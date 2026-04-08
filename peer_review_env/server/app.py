@@ -6,6 +6,9 @@
 
 """FastAPI application for the OpenReview score-prediction benchmark."""
 
+import json
+from typing import Optional
+
 from fastapi.responses import HTMLResponse
 
 try:
@@ -386,7 +389,8 @@ _FRONTEND_HTML = """
     const state = {
       observation: null,
       trace: [],
-      lastReward: 0
+      lastReward: 0,
+      socket: null
     };
 
     const els = {
@@ -496,20 +500,66 @@ _FRONTEND_HTML = """
       return response.json();
     }
 
+    function wsUrl() {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${protocol}//${window.location.host}/ws`;
+    }
+
+    async function ensureSocket() {
+      if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+        return state.socket;
+      }
+      if (state.socket && state.socket.readyState === WebSocket.CONNECTING) {
+        return new Promise((resolve, reject) => {
+          state.socket.addEventListener('open', () => resolve(state.socket), { once: true });
+          state.socket.addEventListener('error', reject, { once: true });
+        });
+      }
+
+      state.socket = new WebSocket(wsUrl());
+      return new Promise((resolve, reject) => {
+        state.socket.addEventListener('open', () => resolve(state.socket), { once: true });
+        state.socket.addEventListener('error', reject, { once: true });
+      });
+    }
+
+    async function wsRequest(type, data = {}) {
+      const socket = await ensureSocket();
+      return new Promise((resolve, reject) => {
+        const onMessage = (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            if (payload.type === 'error') {
+              const msg = payload.data?.message || 'Unknown websocket error';
+              reject(new Error(msg));
+              return;
+            }
+            resolve(payload.data || {});
+          } catch (err) {
+            reject(err);
+          } finally {
+            socket.removeEventListener('message', onMessage);
+          }
+        };
+        socket.addEventListener('message', onMessage);
+        socket.send(JSON.stringify({ type, data }));
+      });
+    }
+
     async function resetTask() {
       setStatus('Resetting task...');
       state.trace = [];
       renderTrace();
       const payload = { task_id: els.taskId.value };
-      const result = await api('/reset', { method: 'POST', body: JSON.stringify(payload) });
+      const result = await wsRequest('reset', payload);
       state.lastReward = result.reward ?? 0;
-      renderObservation(result.observation);
+      renderObservation(result.observation || {});
       setStatus('Task ready. Read the paper markdown and submit a score prediction.');
     }
 
     async function refreshState() {
       setStatus('Refreshing state...');
-      const result = await api('/state');
+      const result = await wsRequest('state');
       setStatus(`Episode ${result.episode_id || 'n/a'} · step ${result.step_count}`);
     }
 
@@ -524,19 +574,16 @@ _FRONTEND_HTML = """
         finalize
       };
       setStatus('Submitting prediction...');
-      const result = await api('/step', {
-        method: 'POST',
-        body: JSON.stringify({ action })
-      });
+      const result = await wsRequest('step', action);
       state.lastReward = result.reward ?? 0;
       state.trace.unshift({
         action,
         reward: result.reward ?? 0,
         done: result.done,
-        breakdown: result.observation.score_breakdown || {}
+        breakdown: (result.observation || {}).score_breakdown || {}
       });
       renderTrace();
-      renderObservation(result.observation);
+      renderObservation(result.observation || {});
       setStatus(result.done ? 'Episode finished.' : 'Prediction submitted. You can revise and step again.');
     }
 
@@ -556,8 +603,7 @@ _FRONTEND_HTML = """
 """
 
 
-@app.get("/", include_in_schema=False)
-def root() -> HTMLResponse:
+def _frontend_response() -> HTMLResponse:
     task_options = [
         {
             "id": task_id,
@@ -566,8 +612,34 @@ def root() -> HTMLResponse:
         for task_id in TASK_ORDER
     ]
     return HTMLResponse(
-        _FRONTEND_HTML.replace("__TASK_OPTIONS__", str(task_options).replace("'", '"'))
+        _FRONTEND_HTML.replace("__TASK_OPTIONS__", json.dumps(task_options))
     )
+
+
+@app.get("/", include_in_schema=False)
+def root() -> HTMLResponse:
+    return _frontend_response()
+
+
+@app.get("/web", include_in_schema=False)
+@app.get("/web/", include_in_schema=False)
+def root_web() -> HTMLResponse:
+    return _frontend_response()
+
+
+@app.get("/reset", include_in_schema=False)
+def reset_get(
+    task_id: Optional[str] = None,
+    seed: Optional[int] = None,
+    episode_id: Optional[str] = None,
+) -> dict:
+    env = PeerReviewEnvironment()
+    observation = env.reset(task_id=task_id, seed=seed, episode_id=episode_id)
+    return {
+        "observation": observation.model_dump(),
+        "reward": observation.reward,
+        "done": observation.done,
+    }
 
 
 def main(host: str = "0.0.0.0", port: int = 8000):
