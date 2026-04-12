@@ -2,5 +2,18 @@ spec_version: 1
 name: peer_review_env
 type: space
 runtime: fastapi
-app: peer_review_env.server.app:app
+app: server.app:app
 port: 8000
+tasks:
+  - id: easy_task
+    name: Easy Task
+    difficulty: easy
+    grader: server.graders:EasyGrader
+  - id: medium_task
+    name: Medium Task
+    difficulty: medium
+    grader: server.graders:MediumGrader
+  - id: hard_task
+    name: Hard Task
+    difficulty: hard
+    grader: server.graders:HardGrader

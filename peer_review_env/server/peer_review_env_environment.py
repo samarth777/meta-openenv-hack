@@ -152,10 +152,22 @@ class PeerReviewEnvironment(
 
     def _select_task(self, task_id: Optional[str], seed: Optional[int]) -> TaskSpec:
         if task_id:
-            return TASKS[task_id]
+            if task_id in TASKS:
+                return TASKS[task_id]
+            alias_map = self._task_alias_map()
+            if task_id in alias_map:
+                return TASKS[alias_map[task_id]]
+            raise KeyError(f"Unknown task_id: {task_id}")
         if seed is None:
             return TASKS[TASK_ORDER[0]]
         return TASKS[TASK_ORDER[seed % len(TASK_ORDER)]]
+
+    def _task_alias_map(self) -> dict[str, str]:
+        alias_map: dict[str, str] = {}
+        for task_id in TASK_ORDER:
+            task = TASKS[task_id]
+            alias_map[f"{task.difficulty}_task"] = task_id
+        return alias_map
 
     def _build_observation(
         self,
